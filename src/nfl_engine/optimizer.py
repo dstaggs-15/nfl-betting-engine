@@ -77,8 +77,12 @@ def optimize(
                 lowest_confidence_leg=min(legs, key=lambda p: p.confidence).prediction_id,
                 same_game=same_game,
                 model_version=legs[0].model_version,
-                correlation_notes="Shared pace/script and player workloads; heuristic dependencies require validation. "
-                "Different games assumed independent. Payout and ticket eligibility unverified.",
+                correlation_notes=(
+                    "Calibration-period residual copula; estimated dependencies require prospective validation. "
+                    if all("FITTED_CONDITIONAL_DISTRIBUTION" in p.reason_codes for p in legs)
+                    else "Shared pace/script and player workloads; heuristic dependencies require validation. "
+                )
+                + "Different games assumed independent. Payout and ticket eligibility unverified.",
             )
         )
     return sorted(tickets, key=lambda t: t.joint_probability, reverse=True)[:limit]
