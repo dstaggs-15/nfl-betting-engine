@@ -159,11 +159,11 @@ def test_integer_line_keeps_push_mass(prediction):
     sim.bundle = {"models": {"receptions": [True]}, "calibrators": {"receptions": IdentityCalibration()}}
     sim.positions = {}
     line = prediction.line.model_copy(update={"market": Market.RECEPTIONS, "threshold": 3.0})
-    sim.cache = {(line.player_id, "receptions"): np.array([0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 10])}
+    sim.cache = {(line.event_id, line.player_id, "receptions"): np.array([0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 10])}
     under, _ = sim.probability(line.model_copy(update={"direction": "under"}))
     over, _ = sim.probability(line.model_copy(update={"direction": "over"}))
     assert under + over < 1
     assert 1 - under - over == pytest.approx(
-        cdf_at(3.5, sim.cache[(line.player_id, "receptions")])
-        - cdf_at(2.5, sim.cache[(line.player_id, "receptions")])
+        cdf_at(3.5, sim.cache[(line.event_id, line.player_id, "receptions")])
+        - cdf_at(2.5, sim.cache[(line.event_id, line.player_id, "receptions")])
     )
