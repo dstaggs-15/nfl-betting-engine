@@ -113,6 +113,16 @@ def refresh(root, now, season, mode="refresh"):
     nfl.teams(root)
     context = Context(upcoming, Identity(players), read_json(root / "config/provider_bindings.json", {}))
     lines, health = collect(root, context, now, config)
+    line_counts = {}
+    for item in lines:
+        line_counts[item.player_id] = line_counts.get(item.player_id, 0) + 1
+    upcoming_teams = {team for game in upcoming for team in (game.home, game.away)}
+    directory = {
+        p["player_id"]: {**p, "line_count": line_counts.get(p["player_id"], 0)}
+        for p in players
+        if p["team"] in upcoming_teams
+    }
+    write_json(root / "site/data/players.json", sorted(directory.values(), key=lambda p: p["player_name"]))
     registry = registry_for(root, games, now)
     if registry:
         config["model_version"] = registry["model_version"]

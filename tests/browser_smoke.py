@@ -34,6 +34,28 @@ try:
         if schedule:
             page.locator(".game-card button").first.click()
             assert page.locator("#selected-game").inner_text() != "All games"
+        assert page.locator("h1").text_content() == "Line Watcher"
+        assert "More evidence" not in page.locator("body").inner_text()
+        # Search suggestions use real current lines and clear a previously selected game.
+        predictions = json.loads((root / "site/data/current_predictions.json").read_text())
+        if predictions:
+            page.locator("#fresh").uncheck()
+            name = predictions[0]["line"]["player_name"]
+            page.locator("#search").fill(name[:4])
+            page.wait_for_selector("#player-suggestions [role=option]")
+            assert page.locator("#search").get_attribute("aria-expanded") == "true"
+            page.locator("#player-suggestions [role=option]").filter(has_text=name).first.click()
+            assert page.locator("#search").input_value() == name
+            assert page.locator("#selected-game").text_content() == "All games"
+            assert page.locator("#props tr").count() > 0
+            assert name in page.locator("#props").inner_text()
+            page.locator("#search").fill(name[:4])
+            page.locator("#search").press("ArrowDown")
+            assert page.locator("#search").get_attribute("aria-activedescendant")
+            page.locator("#search").press("Enter")
+            assert page.locator("#player-suggestions").is_hidden()
+            page.locator("#search").fill("")
+        assert "0 props" not in page.locator("#games").inner_text()
         page.locator("button[data-legs='4']").click()
         assert page.locator("#legs").input_value() == "4"
         page.locator("button[data-ranking='ev']").click()

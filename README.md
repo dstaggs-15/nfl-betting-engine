@@ -1,4 +1,4 @@
-# Gridiron Lab — NFL Betting Engine
+# Line Watcher — NFL Betting Engine
 
 A read-only NFL prop research dashboard with live Kalshi contract quotes, nflverse statistics, workload and touchdown simulations, theoretical 2/3/4-leg research combinations, immutable pregame observations, final-result reconciliation, and a JSON-backed historical tracker. It never places bets or orders.
 

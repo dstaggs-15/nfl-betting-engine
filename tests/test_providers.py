@@ -80,3 +80,26 @@ def test_export_cannot_fabricate_freshness(tmp_path, now):
         read_export(path)
     path.write_text(json.dumps({"markets": [], "exported_at": "2026-10-12T10:00:00Z"}))
     assert read_export(path)["exported_at"] == "2026-10-12T10:00:00Z"
+
+
+def test_kalshi_thursday_game_uses_local_schedule_date(game, now):
+    from datetime import UTC, datetime
+
+    thursday = game.model_copy(update={"kickoff": datetime(2026, 10, 16, 2, 15, tzinfo=UTC)})
+    raw = {
+        "markets": [
+            {
+                "ticker": "KXNFLPASSYDS-26OCT15HOUJAC-JACTLAWRENCE16-250",
+                "event_ticker": "KXNFLPASSYDS-26OCT15HOUJAC",
+                "status": "active",
+                "strike_type": "greater",
+                "title": "Trevor Lawrence: 250+ passing yards",
+                "floor_strike": 249.5,
+                "yes_ask_dollars": "0.5000",
+                "no_ask_dollars": "0.5200",
+            }
+        ]
+    }
+    assert len(Kalshi().normalize(raw, context(thursday), now)) == 2
+    raw["markets"][0]["event_ticker"] = "KXNFLPASSYDS-26OCT16HOUJAC"
+    assert not Kalshi().normalize(raw, context(thursday), now)

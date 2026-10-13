@@ -7,6 +7,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -224,7 +225,7 @@ class Kalshi:
         aliases = {"LA": "LAR", "WAS": "WSH", "JAX": "JAC"}
         matches = []
         for game in context.games.values():
-            date = game.kickoff.strftime("%y%b%d").upper()
+            date = game.kickoff.astimezone(ZoneInfo("America/New_York")).strftime("%y%b%d").upper()
             away, home = aliases.get(game.away, game.away), aliases.get(game.home, game.home)
             expected = f"{series}-{date}{away}{home}"
             if item.get("event_ticker") == expected:
