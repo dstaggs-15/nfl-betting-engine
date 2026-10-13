@@ -19,6 +19,7 @@ try:
         executable = os.getenv("BROWSER_EXECUTABLE")
         browser = p.chromium.launch(headless=True, **({"executable_path": executable} if executable else {}))
         page = browser.new_page()
+        page.clock.install()
         errors = []
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(base)
@@ -60,6 +61,9 @@ try:
         page.wait_for_selector(".provider")
         assert page.evaluate("document.documentElement.scrollWidth<=window.innerWidth")
         page.screenshot(path="/tmp/line-watcher-simple-mobile.png", full_page=False)
+        page.clock.fast_forward(31 * 60 * 1000)
+        assert page.locator("#pick-cards .pick-card").count() == 0
+        assert "Stale" in page.locator("#providers").inner_text()
         assert not errors, errors
         browser.close()
     print(
