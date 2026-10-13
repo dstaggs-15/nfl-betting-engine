@@ -1,0 +1,25 @@
+name: CI
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['site/data/**', 'data/**']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.23'
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run ruff check src tests
+      - run: uv run ruff format --check src tests
+      - run: uv run pytest -q
+      - run: uv run python -m nfl_engine.pipeline build
+      - run: uv run playwright install --with-deps chromium
+      - run: uv run python tests/browser_smoke.py

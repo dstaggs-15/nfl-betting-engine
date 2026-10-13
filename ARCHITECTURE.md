@@ -1,0 +1,11 @@
+# Architecture
+
+Python 3.12 collects public read-only provider payloads and nflreadpy data. Validated Pydantic records join provider event/player identifiers to schedule and roster identities. Ambiguous matches are rejected. Provider failures are isolated; prior observations remain visibly stale. The static browser never contacts providers or receives credentials.
+
+The pipeline writes content-addressed line observations, one create-only official prediction per game, and separate create-only results. A rebuild joins these into compact JSON for index.html and tracker.html. Official records include input hashes and model version. Filesystem immutability prevents accidental overwrite, not malicious repository administrators; Git history provides additional auditing.
+
+Initial models use recency-weighted empirical workload distributions and opponent adjustments with shared game-level simulation. Numeric thresholds use the same sampled player result, preserving alternate-line relationships. TD/first-TD models use play-by-play red-zone/goal-line opportunities and shared team scoring arrivals, and abstain where coverage is missing. Calibration and time-forward backtests are separate from current recommendations. Research combinations remain theoretical unless provider-specific ticket eligibility and an actual payout are independently verified. Kalshi contracts are never represented as native parlays.
+
+GitHub Actions uses a single serialized dispatcher every 10 minutes. It discovers kickoff from the schedule and locks T-30 snapshots only before kickoff, reconciles official final results, and checks Central-time summary checkpoints. Generated evidence resides on a separate `data` branch; Pages artifacts combine that branch with current application code. Automated writes do not trigger code workflows. Weekly retraining is a separate Tuesday-gated operation. Public deployments contain only the static pages and compact derived JSON.
+
+Readiness requires fixture/model/history tests, a current NFL data load, generated schema validation, browser smoke tests, and live collection. Network policy and account-level Pages activation are external prerequisites; they cannot be substituted with fabricated records.

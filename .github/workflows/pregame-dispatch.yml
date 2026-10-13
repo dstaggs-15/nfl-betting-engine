@@ -1,0 +1,67 @@
+name: Live data and T-30 dispatcher
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+concurrency:
+  group: nfl-generated-data
+  cancel-in-progress: false
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore generated history from data branch
+        shell: bash
+        run: |
+          if git show-ref --verify --quiet refs/remotes/origin/data; then
+            git restore --source=origin/data --worktree -- data site/data
+          fi
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.23'
+          enable-cache: true
+      - run: uv sync --frozen
+      - uses: actions/cache@v4
+        with:
+          path: .cache
+          key: nflverse-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: nflverse-${{ runner.os }}-
+      - name: Refresh, create due snapshots, reconcile finals and check CT summaries
+        env:
+          XDG_CACHE_HOME: ${{ github.workspace }}/.cache
+        run: uv run python -m nfl_engine.pipeline dispatch
+      - name: Save evidence on data branch
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data site/data
+          tree=$(git write-tree)
+          if git show-ref --verify --quiet refs/remotes/origin/data; then
+            parent=$(git rev-parse origin/data)
+            previous_tree=$(git rev-parse origin/data^{tree})
+            if [ "$tree" = "$previous_tree" ]; then exit 0; fi
+          else
+            parent=$(git rev-parse HEAD)
+          fi
+          commit=$(git commit-tree "$tree" -p "$parent" -m 'Update NFL observations and immutable audit history')
+          git push origin "$commit":refs/heads/data
+      - run: uv run python -m nfl_engine.pipeline build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

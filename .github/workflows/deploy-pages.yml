@@ -1,0 +1,39 @@
+name: Deploy dashboard
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['data/**', 'site/data/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: nfl-generated-data
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: |
+          if git show-ref --verify --quiet refs/remotes/origin/data; then
+            git restore --source=origin/data --worktree -- data site/data
+          fi
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.23'
+      - run: uv sync --frozen --no-dev
+      - run: uv run --no-dev python -m nfl_engine.pipeline build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,20 @@
+timezone = "America/Chicago"
+model_version = "research-0.1"
+minimum_sample = 12
+freshness_seconds = 1800
+simulation_count = 20000
+minimum_confidence = 0.65
+minimum_joint_probability = 0.12
+paper_stake = 10.0
+
+[pregame]
+target_minutes = 30
+window_before_minutes = 35
+minimum_minutes_before_kickoff = 15
+
+[checkpoints]
+friday_morning = "08:00"
+sunday_early = "15:15"
+sunday_late = "18:30"
+sunday_night = "23:00"
+tuesday_morning = "08:00"

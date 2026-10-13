@@ -1,0 +1,63 @@
+name: Weekly research calibration
+on:
+  schedule:
+    # 08:00 Central is 13:00 or 14:00 UTC; Python determines the correct hour.
+    - cron: '0 13,14 * * 2'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: nfl-generated-data
+  cancel-in-progress: false
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Central time gate
+        id: gate
+        run: |
+          python - <<'PY'
+          import os
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+          now=datetime.now(ZoneInfo('America/Chicago'))
+          manual=os.environ['GITHUB_EVENT_NAME']=='workflow_dispatch'
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:
+              f.write(f"due={'true' if manual or now.hour==8 else 'false'}\n")
+          PY
+      - uses: astral-sh/setup-uv@v6
+        if: steps.gate.outputs.due == 'true'
+        with:
+          version: '0.12.23'
+          enable-cache: true
+      - name: Restore history
+        if: steps.gate.outputs.due == 'true'
+        run: |
+          if git show-ref --verify --quiet refs/remotes/origin/data; then
+            git restore --source=origin/data --worktree -- data site/data
+          fi
+      - if: steps.gate.outputs.due == 'true'
+        run: uv sync --frozen
+      - if: steps.gate.outputs.due == 'true'
+        run: |
+          uv run python -m nfl_engine.pipeline reconcile
+          uv run python -m nfl_engine.pipeline backtest
+          uv run python -m nfl_engine.pipeline validate
+      - name: Save weekly research artifact
+        if: steps.gate.outputs.due == 'true'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data site/data
+          tree=$(git write-tree)
+          if git show-ref --verify --quiet refs/remotes/origin/data; then
+            parent=$(git rev-parse origin/data)
+          else
+            parent=$(git rev-parse HEAD)
+          fi
+          commit=$(git commit-tree "$tree" -p "$parent" -m 'Freeze weekly research calibration artifact')
+          git push origin "$commit":refs/heads/data
