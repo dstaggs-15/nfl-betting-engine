@@ -43,7 +43,7 @@ class Game(Record):
 
 class Line(Record):
     line_id: str
-    provider: Literal["underdog", "kalshi"]
+    provider: Literal["underdog", "prizepicks", "kalshi"]
     provider_market_id: str
     event_id: str
     player_id: str
@@ -59,6 +59,8 @@ class Line(Record):
     collected_at: datetime
     raw_source_hash: str
     available: bool = True
+    fee_type: Literal["quadratic", "unknown"] = "unknown"
+    fee_multiplier: float | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def economics(self):

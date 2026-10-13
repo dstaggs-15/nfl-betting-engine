@@ -76,6 +76,8 @@ def line(
     raw_hash,
     price=None,
     price_type="unknown",
+    fee_type="unknown",
+    fee_multiplier=None,
 ):
     game, player = resolved
     return Line(
@@ -99,6 +101,8 @@ def line(
         ),
         price=price,
         price_type=price_type,
+        fee_type=fee_type,
+        fee_multiplier=fee_multiplier,
         collected_at=now,
         raw_source_hash=raw_hash,
     )
@@ -194,7 +198,18 @@ class Kalshi:
         if export:
             return read_export(export)
         markets = []
+        fees = {}
         for series in self.series:
+            try:
+                metadata = get_json("https://api.elections.kalshi.com/trade-api/v2/series/" + series)[
+                    "series"
+                ]
+                fees[series] = {
+                    "type": metadata.get("fee_type"),
+                    "multiplier": metadata.get("fee_multiplier"),
+                }
+            except Exception:
+                pass
             cursor = None
             for _ in range(20):
                 payload = get_json(
@@ -212,7 +227,7 @@ class Kalshi:
                     break
             else:
                 raise ValueError("pagination cap reached; collection incomplete")
-        return {"markets": markets}
+        return {"markets": markets, "fee_metadata": fees}
 
     def automatic_binding(self, item, context):
         series = item.get("event_ticker", "").split("-")[0]
@@ -318,6 +333,15 @@ class Kalshi:
                             raw_hash,
                             float(ask),
                             "contract",
+                            "quadratic"
+                            if raw.get("fee_metadata", {})
+                            .get(item["event_ticker"].split("-")[0], {})
+                            .get("type")
+                            == "quadratic"
+                            else "unknown",
+                            raw.get("fee_metadata", {})
+                            .get(item["event_ticker"].split("-")[0], {})
+                            .get("multiplier"),
                         )
                     )
             except (KeyError, TypeError, ValueError):

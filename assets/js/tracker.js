@@ -1,7 +1,7 @@
 import {$,node,pct,money,time,data,cell,theme,showError,empty,outcome} from './api.js';
 import {playerSearch} from './player-search.js';
 theme();let history;
-function kpi(label,value,note){const el=node('article','','kpi');el.append(node('span',label),node('strong',value),node('small',note));$('kpis').append(el);}
+function kpi(label,value,note){const el=node('article','','kpi');el.append(node('span',label),node('strong',value),node('small',note));(['Predicted / realized','Brier score','Log loss','Weeks / model versions'].includes(label)?$('advanced-kpis'):$('kpis')).append(el);}
 function bars(id,rows){const container=$(id);if(!rows.length){empty(container,'No graded observations yet.');return;}const chart=node('div','','bars');for(const row of rows){const entry=node('div','','bar-row');entry.append(node('span',row.label));const track=node('div','','bar-track');const bar=node('div','','bar');bar.style.width=`${Math.max(0,Math.min(100,row.value*100))}%`;track.append(bar);entry.append(track,node('span',`${pct(row.value)} n=${row.n}`));chart.append(entry);}container.append(chart);}
 function renderBreakdown(){const field=$('breakdown').value;$('breakdown-chart').replaceChildren();bars('breakdown-chart',Object.entries(history.breakdown[field]||{}).filter(([,v])=>v.count).map(([k,v])=>({label:k,value:v.hit_rate,n:v.count})));}
 $('breakdown').addEventListener('change',renderBreakdown);
