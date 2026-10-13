@@ -76,6 +76,7 @@ def run_backtest(root, history, games, config, maximum=1200):
     fit = [r for r in selected if r["kickoff"][:10] <= boundary]
     evaluation = [r.copy() for r in selected if r["kickoff"][:10] > boundary]
     coefficients = {}
+    support = {}
     for market in sorted(SUPPORTED):
         if market == "first_touchdown":
             continue
@@ -89,10 +90,13 @@ def run_backtest(root, history, games, config, maximum=1200):
         if model.coef_[0, 0] <= 0:
             continue  # A reversed calibration is evidence to abstain, not ship it.
         coefficients[str(market)] = [float(model.coef_[0, 0]), float(model.intercept_[0])]
+        support[str(market)] = [float(min(p)), float(max(p))]
     from .model import calibrate
 
     for row in evaluation:
-        row["probability"] = calibrate(row["probability"], row["market"], {"calibration": coefficients})
+        row["probability"] = calibrate(
+            row["probability"], row["market"], {"calibration": coefficients, "calibration_support": support}
+        )
     report = {
         "created_at": datetime.now(UTC).isoformat(),
         "source": "nflreadpy player game stats",
@@ -111,12 +115,13 @@ def run_backtest(root, history, games, config, maximum=1200):
     season = min(future, key=lambda g: g.kickoff).season if future else recent_season + 1
     week = min(future, key=lambda g: g.kickoff).week if future else 1
     registry = {
-        "model_version": f"research-{season}.{week}.2",
+        "model_version": f"research-{season}.{week}.3",
         "created_at": report["created_at"],
         "trained_through": boundary,
         "training_data_hash": digest(history),
         "feature_schema_hash": digest(sorted(SUPPORTED)),
         "calibration": coefficients,
+        "calibration_support": support,
         "validation": report["markets"],
         "production_validated": False,
         "limitations": [
@@ -125,7 +130,7 @@ def run_backtest(root, history, games, config, maximum=1200):
             "selection favors players with sufficient positive usage",
         ],
     }
-    registry_path = root / f"data/model_registry/{season}/week-{week:02}-r2.json"
+    registry_path = root / f"data/model_registry/{season}/week-{week:02}-r3.json"
     if not registry_path.exists():
         immutable(registry_path, registry)
     return report

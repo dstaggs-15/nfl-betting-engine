@@ -2,7 +2,7 @@ from itertools import combinations
 
 import numpy as np
 
-from .schemas import Ticket
+from .schemas import Market, Ticket
 from .storage import digest
 
 
@@ -36,6 +36,8 @@ def optimize(
         p
         for p in predictions
         if p.status in (("RECOMMENDED",) if official else ("WATCH", "RECOMMENDED"))
+        and p.line.market != Market.FIRST_TD
+        and p.probability >= 0.55
         and p.confidence >= minimum_confidence
         and p.prediction_id in masks
     ]

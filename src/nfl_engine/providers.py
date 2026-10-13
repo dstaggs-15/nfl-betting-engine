@@ -90,7 +90,13 @@ def line(
         market=canonical,
         threshold=threshold,
         direction=direction,
-        display_line=f"{direction.title()} {threshold}",
+        display_line=(
+            ("Scores first touchdown" if direction == "over" else "Does not score first touchdown")
+            if canonical == Market.FIRST_TD
+            else ("Scores a touchdown" if direction == "over" else "Does not score a touchdown")
+            if canonical == Market.ANYTIME_TD
+            else f"{direction.title()} {threshold}"
+        ),
         price=price,
         price_type=price_type,
         collected_at=now,
