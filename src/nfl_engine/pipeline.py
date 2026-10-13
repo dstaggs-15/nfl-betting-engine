@@ -29,7 +29,9 @@ def registry_for(root, games, now):
     if not upcoming:
         return None
     game = upcoming[0]
-    return read_json(root / f"data/model_registry/{game.season}/week-{game.week:02}.json")
+    directory = root / f"data/model_registry/{game.season}"
+    artifacts = [read_json(path) for path in directory.glob(f"week-{game.week:02}*.json")]
+    return max(artifacts, key=lambda record: record["created_at"]) if artifacts else None
 
 
 def collect(root, context, now, config):

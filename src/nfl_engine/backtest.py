@@ -111,7 +111,7 @@ def run_backtest(root, history, games, config, maximum=1200):
     season = min(future, key=lambda g: g.kickoff).season if future else recent_season + 1
     week = min(future, key=lambda g: g.kickoff).week if future else 1
     registry = {
-        "model_version": f"research-{season}.{week}.1",
+        "model_version": f"research-{season}.{week}.2",
         "created_at": report["created_at"],
         "trained_through": boundary,
         "training_data_hash": digest(history),
@@ -125,7 +125,7 @@ def run_backtest(root, history, games, config, maximum=1200):
             "selection favors players with sufficient positive usage",
         ],
     }
-    registry_path = root / f"data/model_registry/{season}/week-{week:02}.json"
+    registry_path = root / f"data/model_registry/{season}/week-{week:02}-r2.json"
     if not registry_path.exists():
         immutable(registry_path, registry)
     return report

@@ -27,3 +27,5 @@ Generated site/data/backtest.json contains current counts, held-out Brier/log lo
 ## Grading and audit
 
 Only NFL schedule rows with recorded official final scores are eligible for grading. The original threshold/direction is preserved. Missing player results stay pending; missing stats are never inferred as zero. Numeric equalities are pushes. Special rescue/no-snap/provider settlement requires explicit support before paper P/L. Original predictions and final results are separate immutable records; losing weeks are retained.
+
+The r2 research registry supersedes the initial r1 artifact because evaluation sampling now selects on prior usage rather than the future stat value. The r1 record remains preserved for provenance and must not be used for new forecasts. The runner selects the latest week-specific artifact; published historical predictions retain their recorded version. This correction does not establish production validation.

@@ -260,3 +260,18 @@ def test_cross_game_requires_all_final(tmp_path, game, now, prediction):
     games[second_game.event_id] = second_game.model_copy(update={"status": "final"})
     results = grade_snapshot(snap, games, stats, second_game.kickoff + timedelta(hours=4))
     assert [g.result for g in results.legs] == ["win", "loss"]
+
+
+def test_registry_selects_latest_revision(tmp_path, game, now):
+    from nfl_engine.pipeline import registry_for
+    from nfl_engine.storage import write_json
+
+    write_json(
+        tmp_path / "data/model_registry/2026/week-06.json",
+        {"model_version": "r1", "created_at": now.isoformat()},
+    )
+    write_json(
+        tmp_path / "data/model_registry/2026/week-06-r2.json",
+        {"model_version": "r2", "created_at": (now + timedelta(seconds=1)).isoformat()},
+    )
+    assert registry_for(tmp_path, [game], now)["model_version"] == "r2"
