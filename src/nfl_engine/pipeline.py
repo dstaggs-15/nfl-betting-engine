@@ -1,6 +1,8 @@
 import argparse
+import hashlib
 import logging
 import os
+import re
 import shutil
 import tomllib
 from datetime import UTC, datetime
@@ -8,6 +10,7 @@ from pathlib import Path
 
 from . import nfl
 from .backtest import run_backtest
+from .dfs import OddsAPI, PrizePicks
 from .history import reconcile, save_official, snapshot_path, tracker
 from .model import Simulator, predict
 from .normalize import Identity
@@ -16,6 +19,7 @@ from .providers import Context, Kalshi, Underdog
 from .scheduler import due_checkpoints, due_games
 from .schemas import Line, Prediction, Snapshot, Ticket
 from .storage import digest, immutable, read_json, write_json
+from .value import contract_value, qualifying_value
 
 logger = logging.getLogger("nfl_engine")
 
@@ -38,13 +42,47 @@ def collect(root, context, now, config):
     old_status = read_json(root / "site/data/status.json", {}).get("providers", {})
     old_lines = read_json(root / "site/data/current_lines.json", [])
     output, health = [], {}
-    for provider in (Underdog(), Kalshi()):
+    fallback = []
+    if os.getenv("ODDS_API_KEY"):
+        try:
+            cache_path = root / ".cache/odds-api.json"
+            cached = read_json(cache_path, {})
+            if cached and (now - datetime.fromisoformat(cached["fetched_at"])).total_seconds() < 1800:
+                payload = cached["events"]
+            else:
+                payload = OddsAPI().fetch()
+                write_json(cache_path, {"fetched_at": now.isoformat(), "events": payload})
+            fallback = OddsAPI().normalize(
+                payload, context, read_json(root / "site/data/teams.json", {}), now
+            )
+            for provider_name in ("underdog", "prizepicks"):
+                normalized = [p.model_dump(mode="json") for p in fallback if p.provider == provider_name]
+                if normalized:
+                    archive = root / f"data/lines/{now.year}/{provider_name}/{digest(normalized)}.json"
+                    immutable(
+                        archive,
+                        {"collected_at": now.isoformat(), "source": "the_odds_api", "normalized": normalized},
+                    )
+        except Exception as exc:
+            logger.warning("third_party_failure_type=%s", type(exc).__name__)
+    for provider in (Underdog(), PrizePicks(), Kalshi()):
         previous = old_status.get(provider.name, {})
         last_success = previous.get("last_success")
         try:
             raw = provider.fetch_markets()
             lines = provider.normalize(raw, context, now)
-            raw_count = len(raw.get("over_under_lines" if provider.name == "underdog" else "markets", []))
+            if not lines:
+                lines = [p for p in fallback if p.provider == provider.name]
+            raw_count = len(
+                raw.get(
+                    "over_under_lines"
+                    if provider.name == "underdog"
+                    else "data"
+                    if provider.name == "prizepicks"
+                    else "markets",
+                    [],
+                )
+            )
             current_hash = digest(raw)
             # Archives are create-only and deduplicated by exact payload hash.
             archive = root / f"data/lines/{now.year}/{provider.name}/{current_hash}.json"
@@ -80,6 +118,23 @@ def collect(root, context, now, config):
                 if getattr(getattr(exc, "response", None), "status_code", None) == 401
                 else "DOWN"
             )
+            recovered = [p for p in fallback if p.provider == provider.name]
+            if recovered:
+                output.extend(recovered)
+                last_success = max(p.collected_at for p in recovered).isoformat()
+                health[provider.name] = {
+                    "status": "STALE"
+                    if (now - datetime.fromisoformat(last_success)).total_seconds()
+                    > config["freshness_seconds"]
+                    else "OK",
+                    "last_success": last_success,
+                    "last_attempt": now.isoformat(),
+                    "message": "Lines collected through The Odds API.",
+                    "accepted_records": len(recovered),
+                    "source": "the_odds_api",
+                    "age_seconds": (now - datetime.fromisoformat(last_success)).total_seconds(),
+                }
+                continue
             retained = [Line.model_validate(p) for p in old_lines if p["provider"] == provider.name]
             # Failure cannot make old data fresh or available for new recommendations.
             for p in retained:
@@ -127,17 +182,66 @@ def refresh(root, now, season, mode="refresh"):
     if registry:
         config["model_version"] = registry["model_version"]
     simulator = Simulator(history, now, config["simulation_count"])
+    fitted = None
+    if registry and registry.get("fitted_distribution"):
+        from .fitted import FittedSimulator
+
+        fitted = FittedSimulator(history, now, root, registry, config["simulation_count"])
     predictions, masks = [], {}
     for line in lines:
         game = context.games.get(line.event_id)
         if game is None or line.team not in (game.home, game.away):
             continue
         p, mask = predict(line, simulator, now, config, registry)
+        if fitted:
+            probability, prior = fitted.probability(line)
+            if probability is not None:
+                p = p.model_copy(
+                    update={
+                        "probability": probability,
+                        "reason_codes": ["TIME_CAUSAL_INPUTS", "FITTED_CONDITIONAL_DISTRIBUTION"],
+                        "risk_codes": [
+                            r
+                            for r in p.risk_codes
+                            if r not in ("UNCALIBRATED_MARKET", "HEURISTIC_GAME_FACTORS")
+                        ]
+                        + ["PROVIDER_LINE_VALIDATION_PENDING"],
+                    }
+                )
+            elif line.market not in ("first_touchdown", "anytime_touchdown"):
+                p = p.model_copy(
+                    update={
+                        "status": "INSUFFICIENT_DATA",
+                        "risk_codes": p.risk_codes + ["OUTSIDE_FITTED_MODEL_DOMAIN"],
+                    }
+                )
         predictions.append(p)
         if mask is not None:
             masks[p.prediction_id] = mask
+    if fitted:
+        eligible = [
+            p
+            for p in predictions
+            if str(p.line.market) in fitted.bundle["models"]
+            and p.status not in ("STALE_LINE", "INSUFFICIENT_DATA")
+        ]
+        masks = fitted.masks(eligible)
+    values = {}
+    for prediction in predictions:
+        item = prediction.line
+        if item.price_type != "contract":
+            continue
+        economics = contract_value(prediction.probability, item.price, item.fee_type, item.fee_multiplier)
+        if economics:
+            values[prediction.prediction_id] = {
+                **economics,
+                "qualifies": qualifying_value(prediction, economics),
+                "probability": prediction.probability,
+                "collected_at": item.collected_at.isoformat(),
+            }
+    write_json(root / "site/data/value.json", values)
     tickets = []
-    for provider_name in ("underdog", "kalshi"):
+    for provider_name in ("underdog", "prizepicks", "kalshi"):
         provider_board = [p for p in predictions if p.line.provider == provider_name]
         for count in (2, 3, 4):
             tickets.extend(
@@ -269,13 +373,38 @@ def build(root):
         shutil.copy2(root / name, target / name)
     for name in ("assets", "site"):
         shutil.copytree(root / name, target / name, dirs_exist_ok=True)
+    # Stable content versions prevent older cached modules from mixing with new imports.
+    assets = {
+        str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()[:12]
+        for path in (root / "assets").rglob("*")
+        if path.is_file()
+    }
+    for name in ("index.html", "tracker.html"):
+        page = target / name
+        html = page.read_text()
+        html = re.sub(
+            r"((?:src|href)=[\"\'])(assets/[^\"\']+)([\"\'])",
+            lambda match: (
+                match[1] + match[2] + "?v=" + assets[match[2]] + match[3] if match[2] in assets else match[0]
+            ),
+            html,
+        )
+        page.write_text(html)
+    for path in (target / "assets/js").glob("*.js"):
+        script = path.read_text()
+        script = re.sub(
+            r"(from ['\"])(\./[^'\"]+\.js)(['\"])",
+            lambda match: match[1] + match[2] + "?v=" + assets["assets/js/" + match[2][2:]] + match[3],
+            script,
+        )
+        path.write_text(script)
     print("Static Pages artifact built at dist/")
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "command", choices=["refresh", "dispatch", "reconcile", "backtest", "build", "validate"]
+        "command", choices=["refresh", "dispatch", "reconcile", "backtest", "train", "build", "validate"]
     )
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--season", type=int, default=datetime.now(UTC).year - (datetime.now(UTC).month < 3))
@@ -287,6 +416,12 @@ def main():
         build(root)
     elif args.command == "validate":
         validate(root)
+    elif args.command == "train":
+        from .fitted import train
+
+        games, history, _ = nfl.load(root, args.season)
+        report = train(root, history, games)
+        print("Fitted model:", report["version"], "markets:", list(report["markets"]))
     elif args.command == "backtest":
         games, history, _ = nfl.load(root, args.season)
         report = run_backtest(root, history, games, load_config(root))

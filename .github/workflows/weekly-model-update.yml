@@ -43,7 +43,7 @@ jobs:
       - if: steps.gate.outputs.due == 'true'
         run: |
           uv run python -m nfl_engine.pipeline reconcile
-          uv run python -m nfl_engine.pipeline backtest
+          uv run python -m nfl_engine.pipeline train
           uv run python -m nfl_engine.pipeline validate
       - name: Save weekly research artifact
         if: steps.gate.outputs.due == 'true'

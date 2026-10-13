@@ -1,139 +1,25 @@
-import {$, node, pct, time, data, cell, theme, showError, empty, outcome} from './api.js';
+import {$,node,pct,money,time,data,theme,showError,empty,outcome} from './api.js';
 import {playerSearch} from './player-search.js';
 theme();
-let selected = '', games = [], predictions = [], tickets = [], teams = {}, status = {}, lines = [], players = [];
-const firstTD = p => p.line.market === 'first_touchdown';
-const unknown = p => p.status === 'INSUFFICIENT_DATA';
-
-function logo(abbr) {
-  const el = node('img', '', 'team-logo');
-  el.src = teams[abbr]?.logo || ''; el.alt = abbr; el.loading = 'lazy';
-  el.addEventListener('error', () => el.replaceWith(node('span', abbr, 'badge')), {once: true});
-  return el;
+let mode='value', selected='', limit=12, games=[], predictions=[], tickets=[], lines=[], players=[], values={}, teams={}, status={}, evaluation={};
+const experimental=p=>['first_touchdown','anytime_touchdown'].includes(p.line.market);
+const fresh=p=>p.status!=='STALE_LINE'&&p.line.available&&Date.now()-Date.parse(p.line.collected_at)<=1800000;
+function visible(p){const l=p.line,q=$('search').value.trim().toLowerCase();return(!selected||l.event_id===selected)&&($('provider').value==='all'||l.provider===$('provider').value)&&(!q||`${l.player_name} ${l.team} ${l.market}`.toLowerCase().includes(q))&&(!$('fresh').checked||fresh(p))&&(!$('exclude-player').value||l.player_name.toLowerCase()!==$('exclude-player').value.toLowerCase())&&(!$('exclude-market').value||l.market!==$('exclude-market').value)&&($('experimental').checked||!experimental(p));}
+function qualified(p){const v=values[p.prediction_id];const report=evaluation.markets?.[p.line.market];const tested=report?.hit_rate_interval?.[0]>=.75;return !experimental(p)&&p.status!=='INSUFFICIENT_DATA'&&fresh(p)&&p.probability>=Number($('minimum-chance').value)/100&&p.confidence>=Number($('confidence').value)/100&&tested&&v&&v.win_profit>=Number($('minimum-profit').value)&&v.expected_profit>0&&v.sensitivity_profit>0&&p.probability-v.break_even<=.20;}
+function renderGames(){const box=$('games');box.replaceChildren();for(const g of games){const card=node('article','','game-card');const meta=node('div','','game-meta');meta.append(node('span',time(g.kickoff)),node('span',g.status));card.append(meta);for(const abbr of[g.away,g.home]){const row=node('div','','team-row');const img=node('img','','team-logo');img.src=teams[abbr]?.logo||'';img.alt=abbr;img.addEventListener('error',()=>img.replaceWith(node('span',abbr,'badge')),{once:true});row.append(img,node('span',teams[abbr]?.name||abbr));card.append(row);}const count=lines.filter(l=>l.event_id===g.event_id).length;card.append(node('p',count?`${count} lines`:'No published lines'));const button=node('button','View lines');button.addEventListener('click',()=>{selected=g.event_id;$('game-filter').value=selected;$('search').value='';setMode('all');$('line-panel').scrollIntoView({behavior:'smooth'});});card.append(button);box.append(card);}}
+function setMode(next){mode=next;limit=12;render();}
+function render(){for(const b of document.querySelectorAll('[data-mode]')){const active=b.dataset.mode===mode;b.setAttribute('aria-selected',String(active));b.classList.toggle('active',active);b.tabIndex=active?0:-1;}$('line-panel').hidden=mode==='parlays';$('parlay-panel').hidden=mode!=='parlays';$('line-panel').setAttribute('aria-labelledby',`tab-${mode==='value'?'value':mode==='safest'?'safest':'all'}`);
+$('ranking-status').textContent=mode==='value'?'Best value: 75%+ estimated chance, worthwhile win profit, and positive estimated return after fees.':mode==='safest'?'Safest: highest estimated hit chance among lines that also pass the value and return checks.':mode==='all'?'All available lines. A listed line is not a recommendation.':'Only tickets with verified payouts can be ranked for profit.';
+const props=predictions.filter(visible);let ranked=mode==='all'?props:props.filter(qualified);ranked.sort(mode==='value'?(a,b)=>values[b.prediction_id].expected_profit-values[a.prediction_id].expected_profit:mode==='safest'?(a,b)=>b.probability-a.probability:(a,b)=>a.line.player_name.localeCompare(b.line.player_name)||b.probability-a.probability);
+if(mode!=='all'){const seen=new Set();ranked=ranked.filter(p=>{const key=`${p.line.provider}:${p.line.player_id}`;if(seen.has(key))return false;seen.add(key);return true;});}
+$('view-title').textContent=mode==='value'?'Best value':mode==='safest'?'Safest':'Player lines';$('line-count').textContent=`${ranked.length} matches`;
+const box=$('pick-cards');box.replaceChildren();if(!ranked.length)empty(box,mode==='all'?'No available lines match these filters. Check the platform status or turn off “Hide stale lines”.':'No lines meet the 75% chance, return, and validation checks. Use All lines to inspect the data.');
+for(const p of ranked.slice(0,limit)){const l=p.line,v=values[p.prediction_id],card=node('article','','pick-card');const head=node('div','','ticket-heading');head.append(node('h3',l.player_name),node('span',l.provider,'badge'));card.append(head,node('p',`${l.market.replaceAll('_',' ')} · ${outcome(l)}`,'pick-line'));const stats=node('div','','pick-stats');const chance=node('div');chance.append(node('small','Estimated hit chance'),node('strong',p.status==='INSUFFICIENT_DATA'?'Not enough data':pct(p.probability)));const profit=node('div');profit.append(node('small','Win profit on a paper $10 budget'),node('strong',v?money(v.win_profit):'Payout needed'));stats.append(chance,profit);card.append(stats);if(v)card.append(node('p',`Estimated average profit: ${money(v.expected_profit)} after ${money(v.estimated_fee)} estimated fees. Paper cost ${money(v.cost)}.`,'muted'));else card.append(node('p','Ticket payout is needed to calculate value.','muted'));const detail=node('details');detail.append(node('summary','Why this estimate?'),node('p',`Based on ${p.sample_size} previous games and ${experimental(p)?'an experimental opportunity model':'the fitted outcome distribution'}. Recent hit rate: ${pct(p.recent_hit_rate)}. Historical median: ${p.median.toFixed(1)}.`,'muted'));if(experimental(p))detail.append(node('p','Experimental touchdown model. Excluded from rankings and combinations.','muted'));if(p.probability-(v?.break_even??l.price??p.probability)>.2)detail.append(node('p','Large disagreement with the market. Missing role or injury information may explain it; excluded from rankings.','muted'));detail.append(node('p',`Collected ${time(l.collected_at)}. ${p.model_version}. Data quality ${pct(p.confidence)}; this is not the hit chance.`,'muted'));card.append(detail);box.append(card);}
+$('show-more').hidden=ranked.length<=limit;
+renderTickets(props);
 }
-function renderGames() {
-  const box = $('games'); box.replaceChildren();
-  const query = $('search').value.trim().toLowerCase();
-  const matching = games.filter(g => !query ||
-    `${g.event_id} ${teams[g.home]?.name || g.home} ${teams[g.away]?.name || g.away}`.toLowerCase().includes(query) ||
-    players.some(p => (p.team === g.home || p.team === g.away) && p.player_name.toLowerCase().includes(query)) ||
-    lines.some(l => l.event_id === g.event_id && `${l.player_name} ${l.market}`.toLowerCase().includes(query)));
-  if (!matching.length) empty(box, query ? 'No games match your search.' : 'No upcoming games in the current schedule window.');
-  for (const game of matching) {
-    const card = node('article', '', `game-card ${selected === game.event_id ? 'active' : ''}`);
-    const meta = node('div', '', 'game-meta');
-    meta.append(node('span', time(game.kickoff)), node('span', game.status.toUpperCase())); card.append(meta);
-    for (const abbr of [game.away, game.home]) {
-      const row = node('div', '', 'team-row'); row.append(logo(abbr), node('span', teams[abbr]?.name || abbr)); card.append(row);
-    }
-    const props = lines.filter(l => l.event_id === game.event_id);
-    const latest = props.map(l => l.collected_at).sort().at(-1);
-    card.append(node('p', props.length ? `${props.length} lines · updated ${time(latest)}` : 'No published lines'));
-    if (!props.length) card.append(node('small', 'No supported provider lines collected for this game.', 'muted'));
-    const button = node('button', 'View game');
-    button.addEventListener('click', () => {
-      selected = game.event_id; renderGames(); render(); $('selected-game').scrollIntoView({behavior: 'smooth', block: 'center'});
-    });
-    card.append(button); box.append(card);
-  }
-}
-function visible(p) {
-  const l = p.line, search = $('search').value.toLowerCase();
-  return (!selected || l.event_id === selected) && ($('provider').value === 'all' || l.provider === $('provider').value) &&
-    (!search || `${l.player_name} ${l.team} ${l.event_id} ${l.market}`.toLowerCase().includes(search)) &&
-    (!$('fresh').checked || p.status !== 'STALE_LINE') &&
-    (!$('exclude-player').value || l.player_name.toLowerCase() !== $('exclude-player').value.toLowerCase()) &&
-    (!$('exclude-market').value || l.market !== $('exclude-market').value);
-}
-function controls() {
-  const ranking = $('ranking').value;
-  const valueAvailable = tickets.some(t => t.eligibility === 'verified' && t.expected_profit != null);
-  const payoutAvailable = tickets.some(t => t.eligibility === 'verified' && t.multiplier != null);
-  $('ranking').querySelector('[value="ev"]').disabled = !valueAvailable;
-  $('ranking').querySelector('[value="payout"]').disabled = !payoutAvailable;
-  for (const button of document.querySelectorAll('.quick-actions button')) {
-    const active = button.dataset.legs ? button.dataset.legs === $('legs').value :
-      button.dataset.scope ? button.dataset.scope === $('scope').value :
-      button.dataset.ranking ? button.dataset.ranking === ranking : !selected;
-    button.setAttribute('aria-pressed', String(active)); button.classList.toggle('active', active);
-    if (button.dataset.ranking === 'ev') {
-      button.disabled = !valueAvailable;
-      button.title = valueAvailable ? 'Rank by verified expected return' : 'Value ranking requires verified full-ticket payouts.';
-      button.textContent = valueAvailable ? 'Best value' : 'Best value unavailable';
-    }
-  }
-  $('ranking-status').textContent = ranking === 'safest' ?
-    'Safest: combinations sorted by joint hit probability; player lines sorted by outcome probability. First-touchdown markets are excluded from combinations until validated. High hit probability does not establish value.' :
-    ranking === 'ev' ? 'Sorted by expected return using verified ticket payouts.' : 'Sorted by verified ticket payout.';
-}
-function render() {
-  controls(); $('selected-game').textContent = selected || 'All games';
-  const props = predictions.filter(visible);
-  props.sort((a,b) => Number(unknown(a)) - Number(unknown(b)) || Number(firstTD(a)) - Number(firstTD(b)) ||
-    ($('alternate').checked && a.line.player_id === b.line.player_id && a.line.market === b.line.market && a.line.direction === 'over' && b.line.direction === 'over' ? a.line.threshold - b.line.threshold : b.probability - a.probability));
-  $('props').replaceChildren();
-  for (const p of props.slice(0,100)) {
-    const tr = node('tr'); cell(tr, p.line.player_name, `${p.line.team} · ${p.line.event_id}`);
-    cell(tr, p.line.market.replaceAll('_',' '), outcome(p.line));
-    cell(tr, p.line.provider, `${p.line.price_type === 'contract' ? 'Ask $' + p.line.price.toFixed(2) + ' · ' : ''}${time(p.line.collected_at)} · ${p.status}`);
-    cell(tr, unknown(p) ? '—' : pct(p.probability), firstTD(p) ? 'Experimental estimate · excluded from combinations' : `Mean ${p.mean.toFixed(1)} / median ${p.median.toFixed(1)}`);
-    cell(tr, `${pct(p.historical_hit_rate)} / ${pct(p.recent_hit_rate)}`, `n=${p.sample_size}`);
-    cell(tr, pct(p.confidence), 'Data quality indicator · not hit probability');
-    cell(tr, `Opponent ×${p.opponent_factor.toFixed(2)}`, p.risk_codes.join(' · ').replaceAll('_',' ').toLowerCase());
-    $('props').append(tr);
-  }
-  $('line-count').textContent = `${props.length} lines${props.length > 100 ? ' · first 100 shown; search to narrow' : ''}`;
-  $('board-empty').hidden = props.length > 0;
-  $('board-empty').textContent = predictions.some(p => visible({...p,status:'WATCH'})) && $('fresh').checked ?
-    'Matching lines are stale. Uncheck “Hide stale lines” to view them.' :
-    $('search').value ? `No provider lines match “${$('search').value}” with the current filters.` : 'No published provider lines match the current filters.';
-  const ids = new Set(props.filter(p => !firstTD(p) && !unknown(p) && p.probability >= .55 && p.confidence >= Number($('confidence').value)/100).map(p => p.prediction_id));
-  const count = Number($('legs').value), same = $('scope').value === 'same', ranking = $('ranking').value;
-  let candidates = tickets.filter(t => t.legs.length === count && t.same_game === same && t.joint_probability >= Number($('joint').value)/100 &&
-    t.legs.every(id => ids.has(id)) && (Number($('payout').value) === 0 || t.multiplier != null && t.multiplier >= Number($('payout').value)));
-  if (ranking === 'ev') candidates = candidates.filter(t => t.eligibility === 'verified' && t.expected_profit != null).sort((a,b) => b.expected_profit-a.expected_profit);
-  else if (ranking === 'payout') candidates = candidates.filter(t => t.eligibility === 'verified' && t.multiplier != null).sort((a,b) => b.multiplier-a.multiplier);
-  else candidates.sort((a,b) => b.joint_probability-a.joint_probability);
-  const box = $('tickets'); box.replaceChildren();
-  if (!candidates.length) empty(box, `No saved ${count}-leg combinations match these filters. ${!ids.size && props.length ? 'No eligible lines remain after data-quality and market checks.' : 'Try another game or adjust the filters.'}`);
-  for (const t of candidates.slice(0,6)) {
-    const card = node('article','','ticket'), head = node('div','','ticket-heading');
-    head.append(node('h3',`${t.provider} · ${count} legs`),node('span',t.eligibility === 'verified' ? 'Eligible' : 'Theoretical','badge warn'));
-    card.append(head,node('div',pct(t.joint_probability),'probability'),node('p',`Joint estimate ±${pct(t.uncertainty)} sampling error · independent estimate ${pct(t.naive_probability)}`));
-    const list = node('ul');
-    for (const id of t.legs) {
-      const p = predictions.find(p => p.prediction_id === id);
-      list.append(node('li', `${p.line.player_name} · ${p.line.market.replaceAll('_',' ')} · ${outcome(p.line)} — ${pct(p.probability)}${id === t.weakest_leg ? ' · weakest leg' : ''}`));
-    }
-    card.append(list,node('p', `Available multiplier: ${t.multiplier ?? 'unverified'} · break-even ${pct(t.break_even)} · EV/$1 ${t.expected_profit?.toFixed(2) ?? 'unavailable'}`),node('p',t.correlation_notes));
-    box.append(card);
-  }
-}
-try {
-  [status,teams,games,predictions,tickets,lines,players] = await Promise.all([...['status','teams','schedule','current_predictions','current_parlays','current_lines'].map(data),data('players').catch(() => [])]);
-  if (!players.length) players = [...new Map(lines.map(l => [l.player_id,{player_id:l.player_id,player_name:l.player_name,team:l.team,line_count:lines.filter(x => x.player_id === l.player_id).length}])).values()];
-  playerSearch($('search'),$('player-suggestions'),players,() => {selected = '';renderGames();render();});
-  for (const p of predictions) if (Date.now()-Date.parse(p.line.collected_at) > 1800000 || !p.line.available) p.status = 'STALE_LINE';
-  for (const p of Object.values(status.providers)) if (p.last_success && Date.now()-Date.parse(p.last_success) > 1800000) p.status = 'STALE';
-  $('week').textContent = status.current_week ? `WEEK ${status.current_week}` : 'NFL';
-  $('refresh').textContent = `Refreshed ${time(status.generated_at)}`;
-  $('model').textContent = `${status.model_version} · ${status.model_status}`;
-  for (const [name,p] of Object.entries(status.providers)) {
-    const el = node('div','','provider'); el.append(node('span','',`dot ${p.status}`));
-    const description = node('div'); description.append(node('strong',`${name.toUpperCase()} · ${p.status}`),node('p',p.message),node('p',`Last collection: ${time(p.last_success)}`));
-    el.append(description); $('providers').append(el);
-  }
-  for (const market of [...new Set(predictions.map(p => p.line.market))].sort()) {
-    const option = node('option',market.replaceAll('_',' '));option.value = market;$('exclude-market').append(option);
-  }
-  renderGames();render();
-} catch(e) {showError(e);}
-for (const input of document.querySelectorAll('.controls input,.controls select')) input.addEventListener('input',render);
-$('search').addEventListener('input',() => {renderGames();render();});
-for (const button of document.querySelectorAll('.quick-actions button')) button.addEventListener('click',() => {
-  if (button.dataset.legs) { $('legs').value = button.dataset.legs; $('ranking').value = 'safest'; }
-  if (button.dataset.scope) $('scope').value = button.dataset.scope;
-  if (button.dataset.ranking) $('ranking').value = button.dataset.ranking;
-  if (button.id === 'clear-game') {selected = '';renderGames();}
-  render();$('ranking-status').scrollIntoView({behavior:'smooth',block:'center'});
-});
+function renderTickets(props){const eligible=new Set(props.filter(p=>fresh(p)&&p.probability>=.75&&p.confidence>=.65&&!experimental(p)).map(p=>p.prediction_id));const count=Number($('legs').value);const same=$('scope').value==='same';const groups=tickets.filter(t=>t.legs.length===count&&t.same_game===same&&t.legs.every(id=>eligible.has(id)));const priced=groups.filter(t=>t.eligibility==='verified'&&t.multiplier>=Number($('minimum-ticket-payout').value)&&t.expected_profit>0&&(t.joint_probability-.05)*t.multiplier>1).sort((a,b)=>b.expected_profit-a.expected_profit);$('tickets').replaceChildren();$('research-tickets').replaceChildren();if(!priced.length)empty($('tickets'),'No verified, positive-value ticket is available. Underdog and PrizePicks lines need live access and an exact ticket payout. Kalshi single-contract prices do not establish parlay payouts.');for(const t of [...priced.slice(0,6),...groups.slice(0,6)]){const verified=priced.includes(t);const card=node('article','','ticket');card.append(node('h3',`${t.provider} · ${t.legs.length} legs`),node('span',verified?'Quoted ticket':'Research group — payout unknown','badge warn'));const list=node('ul');for(const id of t.legs){const p=predictions.find(p=>p.prediction_id===id);list.append(node('li',`${p.line.player_name}: ${outcome(p.line)} ${p.line.market.replaceAll('_',' ')} · ${pct(p.probability)}`));}card.append(list,node('p',`Estimated chance all legs hit: ${pct(t.joint_probability)}`));if(verified)card.append(node('p',`Total payout ${t.multiplier}× · win profit on $10: ${money(10*(t.multiplier-1))} · expected average ${money(10*t.expected_profit)}`));else card.append(node('p','No profit estimate or recommendation without a verified full-ticket payout.'));(verified?$('tickets'):$('research-tickets')).append(card);}if(!groups.length)empty($('research-tickets'),'No saved research group matches these filters and the 75% minimum per leg.');}
+try{[status,teams,games,predictions,tickets,lines,players,values,evaluation]=await Promise.all([...['status','teams','schedule','current_predictions','current_parlays','current_lines'].map(data),data('players').catch(()=>[]),data('value').catch(()=>({})),data('model_evaluation').catch(()=>({}))]);
+$('week').textContent=status.current_week?`WEEK ${status.current_week}`:'NFL';$('refresh').textContent=`Updated ${time(status.generated_at)}`;$('model').textContent=status.model_version;for(const[name,p]of Object.entries(status.providers)){const chip=node('div','','provider');const current=p.last_success&&Date.now()-Date.parse(p.last_success)>1800000?'STALE':p.status;chip.append(node('span','',`dot ${current}`),node('strong',`${name} · ${current==='OK'?'Available':current==='STALE'?'Stale':'Unavailable'}`));chip.title=p.message;$('providers').append(chip);}for(const g of games){const o=node('option',`${g.away} at ${g.home} · ${time(g.kickoff)}`);o.value=g.event_id;$('game-filter').append(o);}for(const m of [...new Set(predictions.map(p=>p.line.market))].sort()){const o=node('option',m.replaceAll('_',' '));o.value=m;$('exclude-market').append(o);}playerSearch($('search'),$('player-suggestions'),players,()=>{selected='';$('game-filter').value='';setMode('all');});const reports=Object.values(evaluation.markets||{});$('evaluation').textContent=reports.length?`Historical selected-line hit rates range from ${pct(Math.min(...reports.map(r=>r.target_75.hit_rate)))} to ${pct(Math.max(...reports.map(r=>r.target_75.hit_rate)))}. Only about ${Math.round(100*Math.min(...reports.map(r=>r.coverage)))}–${Math.round(100*Math.max(...reports.map(r=>r.coverage)))}% of test lines met the 75% predicted-chance threshold.`:'No fitted-model evaluation is available.';renderGames();render();}catch(e){showError(e);}
+for(const b of document.querySelectorAll('[data-mode]')){b.addEventListener('click',()=>setMode(b.dataset.mode));b.addEventListener('keydown',e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();const tabs=[...document.querySelectorAll('[data-mode]')];let i=tabs.indexOf(b);i=e.key==='Home'?0:e.key==='End'?tabs.length-1:(i+(e.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;tabs[i].focus();setMode(tabs[i].dataset.mode);});}
+$('game-filter').addEventListener('input',()=>{selected=$('game-filter').value;limit=12;render();});$('search').addEventListener('input',()=>{limit=12;render();});for(const input of document.querySelectorAll('.controls input,.controls select,#provider,#legs,#scope,#minimum-ticket-payout'))input.addEventListener('input',()=>{limit=12;render();});$('show-more').addEventListener('click',()=>{limit+=12;render();});

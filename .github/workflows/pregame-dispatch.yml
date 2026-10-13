@@ -38,6 +38,7 @@ jobs:
       - name: Refresh, create due snapshots, reconcile finals and check CT summaries
         env:
           XDG_CACHE_HOME: ${{ github.workspace }}/.cache
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
         run: uv run python -m nfl_engine.pipeline dispatch
       - name: Save evidence on data branch
         shell: bash
