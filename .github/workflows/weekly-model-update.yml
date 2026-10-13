@@ -37,9 +37,7 @@ jobs:
       - name: Restore history
         if: steps.gate.outputs.due == 'true'
         run: |
-          if git show-ref --verify --quiet refs/remotes/origin/data; then
-            git restore --source=origin/data --worktree -- data site/data
-          fi
+          python scripts/restore_data.py
       - if: steps.gate.outputs.due == 'true'
         run: uv sync --frozen
       - if: steps.gate.outputs.due == 'true'

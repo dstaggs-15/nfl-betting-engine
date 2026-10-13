@@ -8,3 +8,9 @@ export function cell(row, text, sub='', className='') { const td=node('td','',cl
 export function theme(){ try { if(localStorage.getItem('theme')==='light') document.body.classList.add('light'); } catch {} $('theme')?.addEventListener('click',()=>{document.body.classList.toggle('light');try{localStorage.setItem('theme',document.body.classList.contains('light')?'light':'dark');}catch{}}); }
 export function showError(error){$('error').hidden=false;$('error').textContent=error.message;}
 export function empty(container,text){container.append(node('p',text,'empty'));}
+export function outcome(line) {
+  const yes = line.direction === 'over';
+  if (line.market === 'first_touchdown') return yes ? 'Scores first touchdown' : 'Does not score first touchdown';
+  if (line.market === 'anytime_touchdown') return yes ? 'Scores a touchdown' : 'Does not score a touchdown';
+  return line.display_line;
+}

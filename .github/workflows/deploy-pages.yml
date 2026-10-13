@@ -23,9 +23,7 @@ jobs:
         with:
           fetch-depth: 0
       - run: |
-          if git show-ref --verify --quiet refs/remotes/origin/data; then
-            git restore --source=origin/data --worktree -- data site/data
-          fi
+          python scripts/restore_data.py
       - uses: astral-sh/setup-uv@v6
         with:
           version: '0.12.23'

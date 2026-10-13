@@ -58,9 +58,14 @@ try:
         assert "0 props" not in page.locator("#games").inner_text()
         page.locator("button[data-legs='4']").click()
         assert page.locator("#legs").input_value() == "4"
-        page.locator("button[data-ranking='ev']").click()
-        assert page.locator("#ranking").input_value() == "ev"
-        assert "Verified payout economics" in page.locator("#tickets").inner_text()
+        page.locator("button[data-ranking='safest']").click()
+        assert page.locator("button[data-ranking='safest']").get_attribute("aria-pressed") == "true"
+        assert "First-touchdown markets are excluded" in page.locator("#ranking-status").inner_text()
+        assert page.locator("button[data-ranking='ev']").is_disabled()
+        assert "Scores first touchdown" not in page.locator("#tickets").inner_text()
+        page.locator("button[data-legs='3']").click()
+        assert page.locator("button[data-legs='3']").get_attribute("aria-pressed") == "true"
+        assert page.locator("button[data-legs='4']").get_attribute("aria-pressed") == "false"
         page.locator("a[href='tracker.html']").click()
         page.wait_for_selector(".kpi")
         assert page.locator("#error").is_hidden()

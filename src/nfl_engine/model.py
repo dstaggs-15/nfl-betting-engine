@@ -173,12 +173,18 @@ class Simulator:
         return values, rows, factor
 
 
-def calibrate(p, market, registry):
+def calibration_supported(p, market, registry):
     coefficients = (registry or {}).get("calibration", {}).get(str(market))
-    if not coefficients:
+    support = (registry or {}).get("calibration_support", {}).get(str(market))
+    return bool(coefficients and support and support[0] <= p <= support[1])
+
+
+def calibrate(p, market, registry):
+    if not calibration_supported(p, market, registry):
         return p
-    logit = np.log(np.clip(p, 0.001, 0.999) / (1 - np.clip(p, 0.001, 0.999)))
-    return float(expit(coefficients[0] * logit + coefficients[1]))
+    coefficients = registry["calibration"][str(market)]
+    bounded = float(np.clip(p, 1e-9, 1 - 1e-9))
+    return float(expit(coefficients[0] * np.log(bounded / (1 - bounded)) + coefficients[1]))
 
 
 def predict(line, simulator, now, config, registry=None):
@@ -187,18 +193,21 @@ def predict(line, simulator, now, config, registry=None):
     values = [v for v in values if v is not None]
     stale = (now - line.collected_at).total_seconds() > config["freshness_seconds"] or not line.available
     insufficient = samples is None or len(rows) < config["minimum_sample"]
-    raw_p = (
-        0.5
-        if samples is None
-        else float(
-            np.mean(samples > line.threshold if line.direction == "over" else samples < line.threshold)
-        )
+    push_mass = float(np.mean(samples == line.threshold)) if samples is not None else 0.0
+    raw_over = float(np.mean(samples > line.threshold)) if samples is not None else 0.5
+    conditional_over = raw_over / (1 - push_mass) if push_mass < 1 else 0.0
+    calibrated = line.market != Market.FIRST_TD and calibration_supported(
+        conditional_over, line.market, registry
     )
-    p = raw_p if line.market == Market.FIRST_TD else calibrate(raw_p, line.market, registry)
+    over = calibrate(conditional_over, line.market, registry) * (1 - push_mass) if calibrated else raw_over
+    p = over if line.direction == "over" else max(0.0, 1 - push_mass - over)
     confidence = min(0.85, len(rows) / (len(rows) + 8))
     risks = ["RESEARCH_MODEL", "INJURY_CONTEXT_UNAVAILABLE", "HEURISTIC_GAME_FACTORS"]
-    if not registry or str(line.market) not in registry.get("calibration", {}):
+    if not calibrated:
         risks.append("UNCALIBRATED_MARKET")
+    if line.market == Market.FIRST_TD:
+        risks.append("FIRST_TD_NOT_VALIDATED_FOR_RANKING")
+        confidence = min(confidence, 0.5)
     if values and sum(max(0, v) for v in values) > 0 and max(values) / sum(max(0, v) for v in values) > 0.3:
         risks.append("OUTLIER_CONCENTRATION")
         confidence *= 0.8
@@ -232,7 +241,7 @@ def predict(line, simulator, now, config, registry=None):
     mask = None
     if samples is not None:
         # Rank-coupled calibrated probabilities preserve shared sample dependence.
-        if line.market == Market.FIRST_TD:
+        if not calibrated:
             mask = samples > line.threshold if line.direction == "over" else samples < line.threshold
             return prediction, mask
         ranks = np.argsort(np.argsort(samples, kind="stable"), kind="stable") / len(samples)

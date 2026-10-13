@@ -275,3 +275,59 @@ def test_registry_selects_latest_revision(tmp_path, game, now):
         {"model_version": "r2", "created_at": (now + timedelta(seconds=1)).isoformat()},
     )
     assert registry_for(tmp_path, [game], now)["model_version"] == "r2"
+
+
+def test_opposite_sides_and_pushes_remain_consistent(line, now, history):
+    class Fixed:
+        def samples(self, line):
+            return np.array([200, 250, 300, 300], dtype=float), history, 1.0
+
+    config = {
+        "freshness_seconds": 1800,
+        "minimum_sample": 12,
+        "minimum_confidence": 0.65,
+        "model_version": "test",
+    }
+    registry = {
+        "calibration": {"passing_yards": [0.5, 0.4]},
+        "calibration_support": {"passing_yards": [0.01, 0.99]},
+    }
+    over = line.model_copy(update={"threshold": 250.0})
+    under = over.model_copy(update={"direction": "under"})
+    a, _ = predict(over, Fixed(), now, config, registry)
+    b, _ = predict(under, Fixed(), now, config, registry)
+    assert a.probability + b.probability == pytest.approx(0.75)
+    over = over.model_copy(update={"threshold": 249.5})
+    under = over.model_copy(update={"direction": "under"})
+    a, _ = predict(over, Fixed(), now, config, registry)
+    b, _ = predict(under, Fixed(), now, config, registry)
+    assert a.probability + b.probability == pytest.approx(1)
+
+
+def test_calibration_does_not_extrapolate_into_tails():
+    from nfl_engine.model import calibrate
+
+    registry = {
+        "calibration": {"receiving_yards": [0.1, -0.5]},
+        "calibration_support": {"receiving_yards": [0.3, 0.6]},
+    }
+    assert calibrate(0.01, Market.RECEIVING, registry) == 0.01
+    assert calibrate(0.99, Market.RECEIVING, registry) == 0.99
+    assert calibrate(0.4, Market.RECEIVING, registry) != 0.4
+    assert calibrate(0.4, Market.RECEIVING, {"calibration": registry["calibration"]}) == 0.4
+
+
+def test_unvalidated_first_td_never_in_combinations(prediction):
+    legs = [
+        prediction.model_copy(
+            update={
+                "prediction_id": str(i),
+                "status": "RECOMMENDED",
+                "line": prediction.line.model_copy(update={"player_id": str(i), "market": Market.FIRST_TD}),
+            }
+        )
+        for i in range(3)
+    ]
+    masks = {p.prediction_id: np.ones(100, bool) for p in legs}
+    assert not optimize(legs, masks, 3, True)
+    assert not optimize(legs, masks, 3, True, official=True)
